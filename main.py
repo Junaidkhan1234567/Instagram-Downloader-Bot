@@ -17,8 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
+BOT_TOKEN = os.getenv("8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0")
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
 API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
 API_KEY = os.getenv("API_KEY", "vkrdownloader")
 DB_FILE = "users.db"
