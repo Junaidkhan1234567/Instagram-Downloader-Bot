@@ -1,4 +1,3 @@
-# main.py
 import asyncio
 import os
 import sqlite3
@@ -8,7 +7,7 @@ from contextlib import closing
 from typing import List
 import httpx
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, BufferedInputFile, InputFile
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -17,8 +16,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-BOT_TOKEN = os.getenv("8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
 API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
 API_KEY = os.getenv("API_KEY", "vkrdownloader")
 DB_FILE = "users.db"
@@ -58,7 +57,6 @@ async def get_all_users() -> List[int]:
 
 # Instagram media fetch function
 async def fetch_insta_media(link: str) -> dict | None:
-    """Fetch Instagram media using API"""
     params = {"api_key": API_KEY, "vkr": link}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -75,7 +73,6 @@ async def fetch_insta_media(link: str) -> dict | None:
 
 # Download video with progress
 async def download_with_progress(url: str, msg: Message, label: str) -> bytes | None:
-    """Download video with progress updates"""
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream("GET", url) as resp:
@@ -194,14 +191,11 @@ async def handle_instagram_url(message: Message):
     is_instagram = any(re.search(pattern, text) for pattern in instagram_patterns)
     
     if not is_instagram:
-        # Ignore non-Instagram messages
         return
     
-    # Process Instagram URL
     wait_msg = await message.reply("⏳ <b>Fetching media...</b>")
     
     try:
-        # Fetch media info
         data = await fetch_insta_media(text)
         if not data:
             await wait_msg.edit_text("❌ <b>Error:</b> Could not fetch media. Make sure the URL is public.")
@@ -212,7 +206,6 @@ async def handle_instagram_url(message: Message):
             await wait_msg.edit_text("❌ <b>Error:</b> No media found in this post.")
             return
         
-        # Find best video quality
         best_video = None
         best_quality = 0
         
@@ -222,7 +215,6 @@ async def handle_instagram_url(message: Message):
                 continue
             ext = (item.get("ext") or "mp4").lower()
             if ext in {"mp4", "webm"}:
-                # Prefer higher quality
                 quality_str = item.get("quality", "unknown")
                 quality_score = 0
                 if "1080" in quality_str:
@@ -240,7 +232,6 @@ async def handle_instagram_url(message: Message):
             await wait_msg.edit_text("❌ <b>Error:</b> No video found. This might be a photo post.")
             return
         
-        # Download video with progress
         await wait_msg.edit_text("📥 <b>Downloading video...</b>")
         video_bytes = await download_with_progress(best_video, wait_msg, "📥 Downloading")
         
@@ -248,18 +239,14 @@ async def handle_instagram_url(message: Message):
             await wait_msg.edit_text("❌ <b>Error:</b> Download failed. Please try again.")
             return
         
-        # Send video
         await wait_msg.edit_text("📤 <b>Uploading video...</b>")
         
-        # Get caption
         caption = data["data"].get("caption", "")
         if caption:
             caption = caption[:200] + "..." if len(caption) > 200 else caption
         
-        # Prepare video file
         video_file = BufferedInputFile(video_bytes, filename="instagram_video.mp4")
         
-        # Send video
         try:
             await message.reply_video(
                 video_file,
@@ -268,7 +255,6 @@ async def handle_instagram_url(message: Message):
             )
             await wait_msg.delete()
         except Exception as e:
-            # If video is too large, try sending as document
             if "message is too long" in str(e).lower() or "file is too big" in str(e).lower():
                 await wait_msg.edit_text("📦 <b>Video is large, sending as file...</b>")
                 await message.reply_document(
