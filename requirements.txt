@@ -1,5 +1,5 @@
+# requirements.txt
 aiogram==3.1.1
-aiofiles
-httpx
-aiosqlite
-python-dotenv
+httpx==0.25.0
+python-dotenv==1.0.0
+aiosqlite==0.19.0
