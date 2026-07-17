@@ -4,20 +4,20 @@ services:
     name: instagram-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python3 main.py
+    startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.11.0
       - key: BOT_TOKEN
-        value: "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0"
+        fromEnv: BOT_TOKEN
       - key: ADMIN_IDS
-        value: "1383239349"
+        fromEnv: ADMIN_IDS
       - key: WEB_URL
-        value: "https://instagram-downloader-web.onrender.com"
+        fromEnv: WEB_URL
       - key: API_URL
-        value: "https://vkrdownloader.xyz/server/"
+        fromEnv: API_URL
       - key: API_KEY
-        value: "vkrdownloader"
+        fromEnv: API_KEY
 
   # Web Server (Web)
   - type: web
@@ -27,6 +27,6 @@ services:
     startCommand: gunicorn web:app
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.11.0
       - key: PORT
         value: 10000
