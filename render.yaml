@@ -1,9 +1,10 @@
 services:
   - type: worker
     name: instagram-bot
-    runtime: image
-    buildCommand: docker build -t instagram-bot .
-    startCommand: python main.py
+    runtime: docker
+    repo: https://github.com/Junaidkhan1234567/Instagram-Downloader-Bot
+    branch: 3rd-party
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: BOT_TOKEN
         sync: false
