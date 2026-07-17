@@ -4,7 +4,6 @@ import sqlite3
 import time
 import re
 import json
-import base64
 from contextlib import closing
 from typing import List
 import httpx
@@ -12,7 +11,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums.parse_mode import ParseMode
-from aiogram.client.default import DefaultBotProperties
+# ✅ Fix: Correct import path for aiogram 3.x
+from aiogram.client.bot import DefaultBotProperties
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,218 +22,78 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
 DB_FILE = "users.db"
 
-# ============= INSTAGRAM GRAPHQL API SCRAPING =============
+# ============= INSTAGRAM VIDEO SCRAPING (FIXED) =============
 
-class InstagramScraper:
-    def __init__(self):
-        self.base_url = "https://www.instagram.com"
-        self.api_url = "https://www.instagram.com/api/graphql"
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'X-IG-App-ID': '936619743392459',
-            'X-ASBD-ID': '129477',
-            'X-IG-WWW-Claim': '0',
-            'X-Requested-With': 'XMLHttpRequest',
-        }
-        self.csrf_token = None
-        self.session = None
-    
-    async def get_csrf_token(self, client):
-        """Get CSRF token from Instagram"""
-        try:
-            resp = await client.get(self.base_url, headers=self.headers)
-            if 'csrf_token' in resp.cookies:
-                self.csrf_token = resp.cookies['csrf_token']
-                self.headers['X-CSRFToken'] = self.csrf_token
-            return True
-        except:
-            return False
-    
-    async def get_post_id(self, url: str) -> str:
-        """Extract post ID from URL"""
-        patterns = [
-            r'/reel/([A-Za-z0-9_-]+)',
-            r'/p/([A-Za-z0-9_-]+)',
-            r'/tv/([A-Za-z0-9_-]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-        return None
-    
-    async def fetch_video_url(self, url: str) -> dict | None:
-        """Fetch video URL using multiple methods"""
-        try:
-            # Method 1: Get from Instagram oEmbed API
-            result = await self.fetch_via_oembed(url)
-            if result:
-                return result
-            
-            # Method 2: Get from GraphQL API
-            result = await self.fetch_via_graphql(url)
-            if result:
-                return result
-            
-            # Method 3: Get from public CDN
-            result = await self.fetch_via_cdn(url)
-            if result:
-                return result
-            
-            return None
-            
-        except Exception as e:
-            print(f"Error fetching video: {e}")
-            return None
-    
-    async def fetch_via_oembed(self, url: str) -> dict | None:
-        """Fetch video using Instagram oEmbed API"""
-        try:
-            oembed_url = f"https://api.instagram.com/oembed?url={url}"
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(oembed_url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # Try to get video from thumbnail
-                    thumbnail = data.get("thumbnail_url", "")
-                    if thumbnail:
-                        # Convert thumbnail to video URL
-                        video_url = thumbnail.replace(".jpg", ".mp4")
-                        video_url = video_url.replace("_n.jpg", "_n.mp4")
-                        if video_url != thumbnail:
-                            return {
-                                "url": video_url,
-                                "caption": data.get("title", "Instagram Video"),
-                                "type": "video"
-                            }
-            return None
-        except:
-            return None
-    
-    async def fetch_via_graphql(self, url: str) -> dict | None:
-        """Fetch video using Instagram GraphQL API"""
-        try:
-            post_id = await self.get_post_id(url)
-            if not post_id:
-                return None
-            
-            # GraphQL query for video
-            query = """
-            query GetVideo($id: String!) {
-                ig_shortcode(shortcode: $id) {
-                    __typename
-                    display_url
-                    video_url
-                    edge_media_to_caption {
-                        edges {
-                            node {
-                                text
-                            }
+async def fetch_instagram_video(url: str) -> dict | None:
+    """
+    Fetch Instagram video URL using multiple reliable methods
+    """
+    try:
+        # Method 1: Using Instagram's public oEmbed API
+        oembed_url = f"https://api.instagram.com/oembed?url={url}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(oembed_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                thumbnail = data.get("thumbnail_url", "")
+                if thumbnail:
+                    # Convert thumbnail URL to video URL (common pattern)
+                    video_url = thumbnail.replace(".jpg", ".mp4").replace("_n.jpg", "_n.mp4")
+                    if video_url != thumbnail:
+                        return {
+                            "url": video_url,
+                            "caption": data.get("title", "Instagram Video"),
+                            "type": "video"
                         }
-                    }
-                    edge_media_preview_like {
-                        count
-                    }
-                    owner {
-                        username
-                        full_name
-                    }
-                }
-            }
-            """
-            
-            # Try different API endpoints
-            endpoints = [
-                "https://www.instagram.com/graphql/query",
-                "https://www.instagram.com/api/graphql",
-                "https://www.instagram.com/query",
-            ]
-            
-            variables = {"id": post_id}
-            
-            # Headers for GraphQL
-            headers = {
-                'User-Agent': self.headers['User-Agent'],
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'X-IG-App-ID': '936619743392459',
-            }
-            
-            async with httpx.AsyncClient(timeout=30, headers=headers) as client:
-                for endpoint in endpoints:
-                    try:
-                        resp = await client.post(
-                            endpoint,
-                            json={
-                                "query": query,
-                                "variables": variables,
-                            }
-                        )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            # Extract video URL from response
-                            if "data" in data and "ig_shortcode" in data["data"]:
-                                video_data = data["data"]["ig_shortcode"]
-                                if video_data.get("video_url"):
-                                    caption = ""
-                                    if video_data.get("edge_media_to_caption", {}).get("edges"):
-                                        caption = video_data["edge_media_to_caption"]["edges"][0]["node"]["text"]
-                                    return {
-                                        "url": video_data["video_url"],
-                                        "caption": caption or "Instagram Video",
-                                        "type": "video"
-                                    }
-                    except:
-                        continue
-            
-            return None
-            
-        except Exception as e:
-            print(f"GraphQL error: {e}")
-            return None
-    
-    async def fetch_via_cdn(self, url: str) -> dict | None:
-        """Fetch video from Instagram CDN"""
-        try:
-            post_id = await self.get_post_id(url)
-            if not post_id:
-                return None
-            
-            # Try common CDN patterns
-            cdn_patterns = [
-                f"https://cdninstagram.com/video/{post_id}.mp4",
-                f"https://instagram.fsof2-1.fna.fbcdn.net/v/t50.2886-16/{post_id}.mp4",
-                f"https://video.cdninstagram.com/video/{post_id}.mp4",
-            ]
-            
-            async with httpx.AsyncClient(timeout=30) as client:
-                for cdn_url in cdn_patterns:
-                    try:
-                        resp = await client.head(cdn_url)
-                        if resp.status_code == 200:
-                            return {
-                                "url": cdn_url,
-                                "caption": "Instagram Video",
-                                "type": "video"
-                            }
-                    except:
-                        continue
-            
-            return None
-            
-        except Exception as e:
-            print(f"CDN error: {e}")
-            return None
-
-# Initialize scraper
-scraper = InstagramScraper()
+        
+        # Method 2: Using alternative API (instagram-downloader)
+        alt_api = f"https://api.instagram-downloader.com/api/download?url={url}"
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(alt_api)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("url") or data.get("download_url"):
+                    video_url = data.get("url") or data.get("download_url")
+                    if video_url:
+                        return {
+                            "url": video_url,
+                            "caption": data.get("title", "Instagram Video"),
+                            "type": "video"
+                        }
+        
+        # Method 3: Direct page scraping (fallback)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                html = resp.text
+                # Look for video URL in HTML
+                video_patterns = [
+                    r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
+                    r'(https?://[^\s"\']+video[^\s"\']+\.mp4[^\s"\']*)',
+                    r'(https?://[^\s"\']+cdninstagram\.com[^\s"\']+\.mp4[^\s"\']*)',
+                    r'"video_url"\s*:\s*"([^"]+)"',
+                    r'"videoUrl"\s*:\s*"([^"]+)"',
+                ]
+                for pattern in video_patterns:
+                    matches = re.findall(pattern, html)
+                    if matches:
+                        for match in matches:
+                            if match and '.mp4' in match:
+                                return {
+                                    "url": match,
+                                    "caption": "Instagram Video",
+                                    "type": "video"
+                                }
+        
+        return None
+        
+    except Exception as e:
+        print(f"Scraping error: {e}")
+        return None
 
 # ============= DATABASE FUNCTIONS =============
 
@@ -274,14 +134,14 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
     try:
         async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
                 'Range': 'bytes=0-',
             }
             async with client.stream("GET", url, headers=headers) as resp:
-                if resp.status_code != 200 and resp.status_code != 206:
+                if resp.status_code not in [200, 206]:
                     return None
                 total = int(resp.headers.get("content-length", 0))
                 if total == 0:
@@ -311,6 +171,7 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
 
 # ============= TELEGRAM BOT =============
 
+# ✅ Fix: Correct bot initialization
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -332,8 +193,7 @@ async def cmd_start(message: Message):
         "1. Copy Instagram URL\n"
         "2. Paste and send here\n"
         "3. Wait for download\n\n"
-        "⚠️ Only public videos work!\n\n"
-        "⚡ Using GraphQL API (More Reliable)"
+        "⚠️ Only public videos work!"
     )
 
 @dp.message(Command("help"))
@@ -380,7 +240,7 @@ async def cmd_bcast(message: Message):
             pass
     await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
 
-# Main handler - Instagram URL
+# ✅ Main handler - Instagram URL
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
@@ -396,11 +256,11 @@ async def handle_instagram_url(message: Message):
     if not is_instagram:
         return
     
-    wait_msg = await message.reply("⏳ <b>Fetching media via GraphQL API...</b>")
+    wait_msg = await message.reply("⏳ <b>Fetching media...</b>")
     
     try:
-        # Fetch video using multiple methods
-        result = await scraper.fetch_video_url(text)
+        # Fetch video using our scraper
+        result = await fetch_instagram_video(text)
         
         if not result or not result.get("url"):
             await wait_msg.edit_text(
@@ -409,8 +269,7 @@ async def handle_instagram_url(message: Message):
                 "• URL might be private\n"
                 "• Post might be deleted\n"
                 "• Instagram API rate limit reached\n\n"
-                "Try again with a public reel/post.\n"
-                "⚠️ Note: Some Instagram reels may not be accessible."
+                "Try again with a public reel/post."
             )
             return
         
@@ -459,7 +318,7 @@ async def handle_instagram_url(message: Message):
 
 async def main():
     print("🤖 Bot starting...")
-    print("📦 Using Instagram GraphQL API Scraping")
+    print("📦 Using Instagram Web Scraping (Multiple Methods)")
     init_db()
     print("✅ Database initialized")
     print(f"📊 Admin IDs: {ADMIN_IDS}")
