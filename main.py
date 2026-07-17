@@ -26,8 +26,8 @@ load_dotenv()
 # Configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Use from .env, not hardcoded
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
-API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
-API_KEY = os.getenv("API_KEY", "vkrdownloader")
+API_URL = os.getenv("API_URL", "https://instagram120.p.rapidapi.com/api/instagram/posts/")
+API_KEY = os.getenv("API_KEY", "265f594329msh8100f4afb137334p1b062cjsna5a6b3077ff7")
 DB_FILE = "users.db"
 
 # Initialize database
