@@ -13,12 +13,11 @@ from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 from urllib.parse import quote
-import json
 
 load_dotenv()
 
 print("=" * 50)
-print("🤖 Instagram Downloader Bot Starting...")
+print("🤖 Instagram Downloader Bot")
 print("=" * 50)
 
 # ===== CONFIGURATION =====
@@ -32,6 +31,7 @@ if not BOT_TOKEN:
     sys.exit(1)
 
 print(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
+print(f"✅ ADMIN_IDS: {ADMIN_IDS}")
 print(f"✅ WEB_URL: {WEB_URL}")
 
 # ===== DATABASE =====
@@ -45,6 +45,7 @@ def init_db():
         print("✅ Database initialized")
     except Exception as e:
         print(f"❌ Database error: {e}")
+        sys.exit(1)
 
 async def add_user(user_id: int, username: str | None, full_name: str):
     try:
@@ -71,153 +72,92 @@ async def get_all_users() -> List[int]:
         print(f"⚠️ Database error: {e}")
         return []
 
-# ===== INSTAGRAM VIDEO DOWNLOAD FUNCTION =====
+# ===== INSTAGRAM VIDEO DOWNLOAD =====
 
 async def get_instagram_video_url(instagram_url: str) -> str | None:
-    """
-    Instagram URL से video download link निकालें
-    Multiple FREE APIs use करेंगे (No API Key required)
-    """
+    """Multiple FREE APIs से video URL निकालें"""
     
-    # Clean URL
     if not instagram_url.startswith('http'):
         instagram_url = 'https://' + instagram_url
     
     print(f"📥 Processing: {instagram_url}")
     
-    # ===== Method 1: VKR Downloader (Free) =====
+    # Method 1: VKR Downloader
     try:
         print("🔄 Trying VKR Downloader...")
         vkr_url = "https://vkrdownloader.xyz/server/"
-        params = {
-            "api_key": "vkrdownloader",
-            "vkr": instagram_url
-        }
+        params = {"api_key": "vkrdownloader", "vkr": instagram_url}
         
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(vkr_url, params=params)
-            
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("data") and data["data"].get("downloads"):
-                    # Best quality video लें
                     for item in data["data"]["downloads"]:
                         if item.get("url") and (".mp4" in item["url"] or ".webm" in item["url"]):
                             return item["url"]
     except Exception as e:
         print(f"⚠️ VKR error: {e}")
     
-    # ===== Method 2: SnapInsta API (Free) =====
+    # Method 2: SnapInsta
     try:
         print("🔄 Trying SnapInsta...")
         snap_url = "https://snapinsta.app/api/action"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Content-Type": "application/json"
-        }
+        headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
         payload = {"url": instagram_url}
         
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(snap_url, json=payload, headers=headers)
-            
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("data") and data["data"].get("download"):
-                    download_data = data["data"]["download"]
-                    if isinstance(download_data, dict) and download_data.get("url"):
-                        return download_data["url"]
-                    elif isinstance(download_data, list) and len(download_data) > 0:
-                        return download_data[0].get("url")
+                    download = data["data"]["download"]
+                    if isinstance(download, dict) and download.get("url"):
+                        return download["url"]
+                    elif isinstance(download, list) and len(download) > 0:
+                        return download[0].get("url")
     except Exception as e:
         print(f"⚠️ SnapInsta error: {e}")
     
-    # ===== Method 3: SaveInsta API (Free) =====
+    # Method 3: SaveInsta
     try:
         print("🔄 Trying SaveInsta...")
         save_url = "https://saveinsta.app/api/action"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Content-Type": "application/json"
-        }
+        headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
         payload = {"url": instagram_url}
         
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(save_url, json=payload, headers=headers)
-            
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("data") and data["data"].get("download"):
-                    download_data = data["data"]["download"]
-                    if isinstance(download_data, dict) and download_data.get("url"):
-                        return download_data["url"]
-                    elif isinstance(download_data, list) and len(download_data) > 0:
-                        return download_data[0].get("url")
+                    download = data["data"]["download"]
+                    if isinstance(download, dict) and download.get("url"):
+                        return download["url"]
+                    elif isinstance(download, list) and len(download) > 0:
+                        return download[0].get("url")
     except Exception as e:
         print(f"⚠️ SaveInsta error: {e}")
-    
-    # ===== Method 4: InstaDownloader (Free) =====
-    try:
-        print("🔄 Trying InstaDownloader...")
-        insta_url = "https://instadownloader.co/api/convert"
-        params = {"url": instagram_url}
-        
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(insta_url, params=params)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success") and data.get("video"):
-                    return data["video"]
-    except Exception as e:
-        print(f"⚠️ InstaDownloader error: {e}")
-    
-    # ===== Method 5: SocialDownloader (Free) =====
-    try:
-        print("🔄 Trying SocialDownloader...")
-        social_url = "https://socialdownloader.com/api/download"
-        params = {
-            "url": instagram_url,
-            "type": "instagram"
-        }
-        
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(social_url, params=params)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("success") and data.get("data"):
-                    video_url = data["data"].get("url") or data["data"].get("video_url")
-                    if video_url:
-                        return video_url
-    except Exception as e:
-        print(f"⚠️ SocialDownloader error: {e}")
     
     print("❌ All methods failed!")
     return None
 
 async def generate_download_link(instagram_url: str) -> str | None:
-    """Generate download link for web server"""
+    """Download link generate करें"""
     try:
-        # Get video URL
         video_url = await get_instagram_video_url(instagram_url)
-        
         if not video_url:
             return None
         
-        # Clean and encode URL
+        # Clean URL
         video_url = video_url.replace('\\/', '/')
         if video_url.startswith('//'):
             video_url = 'https:' + video_url
         
-        # Create download link for web server
         encoded_url = quote(video_url, safe='')
-        download_link = f"{WEB_URL}/download?url={encoded_url}"
-        
-        print(f"✅ Download link generated: {download_link[:80]}...")
-        return download_link
-        
+        return f"{WEB_URL}/download?url={encoded_url}"
     except Exception as e:
-        print(f"⚠️ Error generating link: {e}")
+        print(f"⚠️ Error: {e}")
         return None
 
 # ===== TELEGRAM BOT =====
@@ -281,12 +221,10 @@ async def cmd_stats(message: Message):
     users = await get_all_users()
     await message.answer(f"📊 <b>Total Users:</b> <code>{len(users)}</code>")
 
-# ===== INSTAGRAM URL HANDLER =====
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
     
-    # Instagram URL check
     patterns = [
         r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[A-Za-z0-9_-]+',
         r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/[A-Za-z0-9_.]+\/?$',
@@ -295,14 +233,9 @@ async def handle_instagram_url(message: Message):
     if not any(re.search(p, text, re.IGNORECASE) for p in patterns):
         return
     
-    # Loading message
-    wait_msg = await message.reply(
-        "⏳ <b>डाउनलोड लिंक जनरेट हो रहा है...</b>\n"
-        "🔄 कृपया थोड़ा इंतज़ार करें..."
-    )
+    wait_msg = await message.reply("⏳ <b>डाउनलोड लिंक जनरेट हो रहा है...</b>")
     
     try:
-        # Generate download link
         download_link = await generate_download_link(text)
         
         if not download_link:
@@ -315,7 +248,6 @@ async def handle_instagram_url(message: Message):
             )
             return
         
-        # Create download button
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(
@@ -333,10 +265,7 @@ async def handle_instagram_url(message: Message):
         )
         
     except Exception as e:
-        await wait_msg.edit_text(
-            f"❌ <b>Error:</b> {str(e)[:100]}"
-        )
-        print(f"⚠️ Error: {e}")
+        await wait_msg.edit_text(f"❌ <b>Error:</b> {str(e)[:100]}")
 
 # ===== MAIN =====
 async def main():
@@ -347,9 +276,11 @@ async def main():
     init_db()
     
     try:
+        # ✅ IMPORTANT: Webhook clear करें
         await bot.delete_webhook(drop_pending_updates=True)
         print("✅ Webhook cleared")
         
+        # Polling start करें
         await dp.start_polling(
             bot,
             polling_timeout=30,
@@ -366,6 +297,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("⚠️ Bot stopped")
-    except Exception as e:
-        print(f"❌ Fatal error: {e}")
-        sys.exit(1)
