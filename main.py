@@ -3,7 +3,7 @@ import os
 import sqlite3
 import time
 import re
-import json
+import logging
 from contextlib import closing
 from typing import List
 import httpx
@@ -11,9 +11,12 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums.parse_mode import ParseMode
-# ✅ Fix: Correct import path for aiogram 3.x
 from aiogram.client.bot import DefaultBotProperties
 from dotenv import load_dotenv
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -22,14 +25,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
 DB_FILE = "users.db"
 
-# ============= INSTAGRAM VIDEO SCRAPING (FIXED) =============
+# ============= INSTAGRAM VIDEO SCRAPING =============
 
 async def fetch_instagram_video(url: str) -> dict | None:
-    """
-    Fetch Instagram video URL using multiple reliable methods
-    """
+    """Fetch Instagram video URL"""
     try:
-        # Method 1: Using Instagram's public oEmbed API
+        # Method 1: oEmbed API
         oembed_url = f"https://api.instagram.com/oembed?url={url}"
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(oembed_url)
@@ -37,31 +38,11 @@ async def fetch_instagram_video(url: str) -> dict | None:
                 data = resp.json()
                 thumbnail = data.get("thumbnail_url", "")
                 if thumbnail:
-                    # Convert thumbnail URL to video URL (common pattern)
                     video_url = thumbnail.replace(".jpg", ".mp4").replace("_n.jpg", "_n.mp4")
                     if video_url != thumbnail:
-                        return {
-                            "url": video_url,
-                            "caption": data.get("title", "Instagram Video"),
-                            "type": "video"
-                        }
+                        return {"url": video_url, "caption": data.get("title", "Instagram Video")}
         
-        # Method 2: Using alternative API (instagram-downloader)
-        alt_api = f"https://api.instagram-downloader.com/api/download?url={url}"
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(alt_api)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("url") or data.get("download_url"):
-                    video_url = data.get("url") or data.get("download_url")
-                    if video_url:
-                        return {
-                            "url": video_url,
-                            "caption": data.get("title", "Instagram Video"),
-                            "type": "video"
-                        }
-        
-        # Method 3: Direct page scraping (fallback)
+        # Method 2: Direct scraping
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -70,29 +51,21 @@ async def fetch_instagram_video(url: str) -> dict | None:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 html = resp.text
-                # Look for video URL in HTML
-                video_patterns = [
+                patterns = [
                     r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
                     r'(https?://[^\s"\']+video[^\s"\']+\.mp4[^\s"\']*)',
-                    r'(https?://[^\s"\']+cdninstagram\.com[^\s"\']+\.mp4[^\s"\']*)',
                     r'"video_url"\s*:\s*"([^"]+)"',
-                    r'"videoUrl"\s*:\s*"([^"]+)"',
                 ]
-                for pattern in video_patterns:
+                for pattern in patterns:
                     matches = re.findall(pattern, html)
                     if matches:
                         for match in matches:
                             if match and '.mp4' in match:
-                                return {
-                                    "url": match,
-                                    "caption": "Instagram Video",
-                                    "type": "video"
-                                }
+                                return {"url": match, "caption": "Instagram Video"}
         
         return None
-        
     except Exception as e:
-        print(f"Scraping error: {e}")
+        logger.error(f"Scraping error: {e}")
         return None
 
 # ============= DATABASE FUNCTIONS =============
@@ -136,9 +109,6 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Range': 'bytes=0-',
             }
             async with client.stream("GET", url, headers=headers) as resp:
                 if resp.status_code not in [200, 206]:
@@ -166,17 +136,18 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
                             pass
                 return chunks
     except Exception as e:
-        print(f"Download error: {e}")
+        logger.error(f"Download error: {e}")
         return None
 
 # ============= TELEGRAM BOT =============
 
-# ✅ Fix: Correct bot initialization
+# ✅ Correct bot initialization with logging
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
+    logger.info(f"User started bot: {message.from_user.id}")
     await add_user(
         message.from_user.id,
         message.from_user.username,
@@ -240,10 +211,11 @@ async def cmd_bcast(message: Message):
             pass
     await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
 
-# ✅ Main handler - Instagram URL
+# Main handler
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
+    logger.info(f"Message received: {text[:50]}... from {message.from_user.id}")
     
     # Check if it's an Instagram URL
     instagram_patterns = [
@@ -257,9 +229,9 @@ async def handle_instagram_url(message: Message):
         return
     
     wait_msg = await message.reply("⏳ <b>Fetching media...</b>")
+    logger.info(f"Processing Instagram URL: {text}")
     
     try:
-        # Fetch video using our scraper
         result = await fetch_instagram_video(text)
         
         if not result or not result.get("url"):
@@ -290,39 +262,41 @@ async def handle_instagram_url(message: Message):
         
         video_file = BufferedInputFile(video_bytes, filename="instagram_video.mp4")
         
-        try:
-            await message.reply_video(
-                video_file,
-                caption=f"📹 <b>Downloaded Successfully!</b>\n\n{caption}" if caption else "✅ <b>Video Downloaded!</b>",
-                supports_streaming=True
-            )
-            await wait_msg.delete()
-        except Exception as e:
-            if "message is too long" in str(e).lower() or "file is too big" in str(e).lower():
-                await wait_msg.edit_text("📦 <b>Video is large, sending as file...</b>")
-                await message.reply_document(
-                    video_file,
-                    caption="📹 <b>Video Downloaded!</b>"
-                )
-                await wait_msg.delete()
-            else:
-                raise e
+        await message.reply_video(
+            video_file,
+            caption=f"📹 <b>Downloaded Successfully!</b>\n\n{caption}" if caption else "✅ <b>Video Downloaded!</b>",
+            supports_streaming=True
+        )
+        await wait_msg.delete()
                 
     except Exception as e:
-        error_msg = str(e)
-        if "413" in error_msg or "too large" in error_msg.lower():
-            await wait_msg.edit_text("❌ <b>Error:</b> Video file is too large (>50MB). Telegram limit exceeded.")
-        else:
-            await wait_msg.edit_text(f"❌ <b>Error:</b> Something went wrong. Please try again.\n\n<code>{error_msg[:100]}</code>")
-        print(f"Error in handle_instagram_url: {e}")
+        logger.error(f"Error: {e}")
+        await wait_msg.edit_text(f"❌ <b>Error:</b> Something went wrong. Please try again.\n\n<code>{str(e)[:100]}</code>")
+
+# ============= MAIN =============
 
 async def main():
-    print("🤖 Bot starting...")
-    print("📦 Using Instagram Web Scraping (Multiple Methods)")
+    logger.info("🤖 Bot starting...")
+    logger.info(f"📊 Bot Token: {BOT_TOKEN[:10]}... (length: {len(BOT_TOKEN)})")
+    logger.info(f"📊 Admin IDs: {ADMIN_IDS}")
+    
+    # Clear webhook
+    await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("✅ Webhook cleared")
+    
     init_db()
-    print("✅ Database initialized")
-    print(f"📊 Admin IDs: {ADMIN_IDS}")
-    print("🚀 Bot is running...")
+    logger.info("✅ Database initialized")
+    
+    # Test bot connection
+    try:
+        me = await bot.get_me()
+        logger.info(f"✅ Bot connected: @{me.username}")
+        logger.info(f"🆔 Bot ID: {me.id}")
+    except Exception as e:
+        logger.error(f"❌ Bot connection failed: {e}")
+        return
+    
+    logger.info("🚀 Bot is running and polling...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
