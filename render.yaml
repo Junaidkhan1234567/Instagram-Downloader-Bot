@@ -1,4 +1,5 @@
 services:
+  # Telegram Bot (Worker)
   - type: worker
     name: instagram-bot
     runtime: python
@@ -8,10 +9,24 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: BOT_TOKEN
-        value: "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0"    # <-- यहां अपना Token डालें
+        value: "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0"
       - key: ADMIN_IDS
-        value: "1383239349"     # <-- यहां अपनी ID डालें
+        value: "1383239349"
+      - key: WEB_URL
+        value: "https://instagram-downloader-web.onrender.com"
       - key: API_URL
         value: "https://vkrdownloader.xyz/server/"
       - key: API_KEY
         value: "vkrdownloader"
+
+  # Web Server (Web)
+  - type: web
+    name: instagram-downloader-web
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn web:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PORT
+        value: 10000
