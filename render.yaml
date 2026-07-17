@@ -1,5 +1,4 @@
 services:
-  # Telegram Bot (Worker)
   - type: worker
     name: instagram-bot
     runtime: python
@@ -7,26 +6,8 @@ services:
     startCommand: python main.py
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.9
       - key: BOT_TOKEN
-        fromEnv: BOT_TOKEN
+        sync: false
       - key: ADMIN_IDS
-        fromEnv: ADMIN_IDS
-      - key: WEB_URL
-        fromEnv: WEB_URL
-      - key: API_URL
-        fromEnv: API_URL
-      - key: API_KEY
-        fromEnv: API_KEY
-
-  # Web Server (Web)
-  - type: web
-    name: instagram-downloader-web
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn web:app
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: PORT
-        value: 1000
+        sync: false
