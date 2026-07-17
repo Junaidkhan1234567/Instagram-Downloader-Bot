@@ -14,6 +14,9 @@ from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 from urllib.parse import quote
 
+# ✅ Import parth-dl
+from parth_dl import InstagramDownloader
+
 load_dotenv()
 
 print("=" * 50)
@@ -33,6 +36,10 @@ if not BOT_TOKEN:
 print(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
 print(f"✅ ADMIN_IDS: {ADMIN_IDS}")
 print(f"✅ WEB_URL: {WEB_URL}")
+
+# ===== CREATE INSTAGRAM DOWNLOADER INSTANCE =====
+# ✅ Initialize once and reuse
+instagram_downloader = InstagramDownloader(verbose=True)
 
 # ===== DATABASE =====
 def init_db():
@@ -72,78 +79,50 @@ async def get_all_users() -> List[int]:
         print(f"⚠️ Database error: {e}")
         return []
 
-# ===== INSTAGRAM VIDEO DOWNLOAD =====
+# ===== INSTAGRAM VIDEO DOWNLOAD (USING PARTH-DL) =====
 
 async def get_instagram_video_url(instagram_url: str) -> str | None:
-    """Multiple FREE APIs से video URL निकालें"""
-    
-    if not instagram_url.startswith('http'):
-        instagram_url = 'https://' + instagram_url
-    
-    print(f"📥 Processing: {instagram_url}")
-    
-    # Method 1: VKR Downloader
+    """
+    Get video URL using parth-dl (No login, No API Key needed)
+    """
     try:
-        print("🔄 Trying VKR Downloader...")
-        vkr_url = "https://vkrdownloader.xyz/server/"
-        params = {"api_key": "vkrdownloader", "vkr": instagram_url}
+        if not instagram_url.startswith('http'):
+            instagram_url = 'https://' + instagram_url
         
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(vkr_url, params=params)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("data") and data["data"].get("downloads"):
-                    for item in data["data"]["downloads"]:
-                        if item.get("url") and (".mp4" in item["url"] or ".webm" in item["url"]):
-                            return item["url"]
-    except Exception as e:
-        print(f"⚠️ VKR error: {e}")
-    
-    # Method 2: SnapInsta
-    try:
-        print("🔄 Trying SnapInsta...")
-        snap_url = "https://snapinsta.app/api/action"
-        headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
-        payload = {"url": instagram_url}
+        print(f"📥 Fetching: {instagram_url}")
         
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(snap_url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("data") and data["data"].get("download"):
-                    download = data["data"]["download"]
-                    if isinstance(download, dict) and download.get("url"):
-                        return download["url"]
-                    elif isinstance(download, list) and len(download) > 0:
-                        return download[0].get("url")
-    except Exception as e:
-        print(f"⚠️ SnapInsta error: {e}")
-    
-    # Method 3: SaveInsta
-    try:
-        print("🔄 Trying SaveInsta...")
-        save_url = "https://saveinsta.app/api/action"
-        headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
-        payload = {"url": instagram_url}
+        # ✅ Use parth-dl to get video info
+        info = await asyncio.to_thread(instagram_downloader.get_info, instagram_url)
         
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(save_url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("data") and data["data"].get("download"):
-                    download = data["data"]["download"]
-                    if isinstance(download, dict) and download.get("url"):
-                        return download["url"]
-                    elif isinstance(download, list) and len(download) > 0:
-                        return download[0].get("url")
+        if info:
+            # Try to get video URL
+            video_url = info.get('video_url')
+            if video_url:
+                print(f"✅ Video found: {video_url[:100]}...")
+                return video_url
+            
+            # If no video_url, try other fields
+            if info.get('videos'):
+                videos = info.get('videos')
+                if isinstance(videos, list) and videos:
+                    return videos[0].get('url')
+                elif isinstance(videos, dict):
+                    return videos.get('url')
+            
+            # If it's a carousel, get first video
+            if info.get('carousel_media'):
+                for item in info.get('carousel_media', []):
+                    if item.get('video_url'):
+                        return item.get('video_url')
+        
+        return None
+        
     except Exception as e:
-        print(f"⚠️ SaveInsta error: {e}")
-    
-    print("❌ All methods failed!")
-    return None
+        print(f"⚠️ Error fetching video: {e}")
+        return None
 
 async def generate_download_link(instagram_url: str) -> str | None:
-    """Download link generate करें"""
+    """Generate download link using parth-dl"""
     try:
         video_url = await get_instagram_video_url(instagram_url)
         if not video_url:
@@ -157,7 +136,7 @@ async def generate_download_link(instagram_url: str) -> str | None:
         encoded_url = quote(video_url, safe='')
         return f"{WEB_URL}/download?url={encoded_url}"
     except Exception as e:
-        print(f"⚠️ Error: {e}")
+        print(f"⚠️ Error generating link: {e}")
         return None
 
 # ===== TELEGRAM BOT =====
@@ -276,11 +255,9 @@ async def main():
     init_db()
     
     try:
-        # ✅ IMPORTANT: Webhook clear करें
         await bot.delete_webhook(drop_pending_updates=True)
         print("✅ Webhook cleared")
         
-        # Polling start करें
         await dp.start_polling(
             bot,
             polling_timeout=30,
