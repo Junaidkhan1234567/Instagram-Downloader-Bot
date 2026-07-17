@@ -19,7 +19,7 @@ load_dotenv()
 # Configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
-WEB_URL = os.getenv("WEB_URL", "https://your-web-service.onrender.com")  # ⚠️ अपना Web URL डालें
+WEB_URL = os.getenv("WEB_URL", "https://instagram-downloader-bot-rcuj.onrender.com")  # ⚠️ अपना Web URL डालें
 API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
 API_KEY = os.getenv("API_KEY", "vkrdownloader")
 DB_FILE = "users.db"
