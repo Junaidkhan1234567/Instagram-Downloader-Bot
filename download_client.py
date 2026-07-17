@@ -4,7 +4,7 @@ import os
 import tempfile
 import asyncio
 from pyrogram import Client
-from info import API_ID, API_HASH, BOT_TOKEN
+from .env import ADMIN_IDS, BOT_TOKEN
 
 # ============================================================
 # GLOBAL VARIABLES
