@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 app = Flask(__name__)
 
-# HTML Template
+# HTML Template for download page
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -150,18 +150,13 @@ HTML_TEMPLATE = """
                 return;
             }
             
-            // Auto download after 2 seconds
             setTimeout(function() {
                 const downloadUrl = '/download-file?url=' + encodeURIComponent(videoUrl);
-                
-                // Start download
                 window.location.href = downloadUrl;
                 
-                // Show result
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('result').classList.remove('hidden');
                 document.getElementById('downloadBtn').href = downloadUrl;
-                
             }, 2000);
         };
         
@@ -255,9 +250,11 @@ def download_file():
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         
         # Download in chunks
+        downloaded = 0
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 temp_file.write(chunk)
+                downloaded += len(chunk)
         
         temp_file.close()
         
