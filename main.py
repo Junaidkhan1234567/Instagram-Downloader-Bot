@@ -1,276 +1,256 @@
 import asyncio
 import os
-import sys
 import sqlite3
+import time
 import re
 from contextlib import closing
 from typing import List
 import httpx
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
-from urllib.parse import quote
 
-# ✅ Import parth-dl
+# Web scraping library for Instagram
 from parth_dl import InstagramDownloader
 
 load_dotenv()
 
-print("=" * 50)
-print("🤖 Instagram Downloader Bot")
-print("=" * 50)
-
-# ===== CONFIGURATION =====
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+# Configuration
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
-WEB_URL = os.getenv("WEB_URL", "https://instagram-downloader-web.onrender.com")
 DB_FILE = "users.db"
 
-if not BOT_TOKEN:
-    print("❌ ERROR: BOT_TOKEN not set!")
-    sys.exit(1)
+# Initialize Instagram Downloader (No API key needed!)
+insta_dl = InstagramDownloader()
 
-print(f"✅ BOT_TOKEN: {BOT_TOKEN[:10]}...")
-print(f"✅ ADMIN_IDS: {ADMIN_IDS}")
-print(f"✅ WEB_URL: {WEB_URL}")
-
-# ===== CREATE INSTAGRAM DOWNLOADER INSTANCE =====
-# ✅ Initialize once and reuse
-instagram_downloader = InstagramDownloader(verbose=True)
-
-# ===== DATABASE =====
+# Initialize database
 def init_db():
-    try:
-        with closing(sqlite3.connect(DB_FILE)) as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-            )
-            conn.commit()
-        print("✅ Database initialized")
-    except Exception as e:
-        print(f"❌ Database error: {e}")
-        sys.exit(1)
+    with closing(sqlite3.connect(DB_FILE)) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        conn.commit()
 
+# Database functions
 async def add_user(user_id: int, username: str | None, full_name: str):
-    try:
-        def _add():
-            with closing(sqlite3.connect(DB_FILE)) as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO users(user_id, username, full_name) VALUES(?,?,?)",
-                    (user_id, username or "Unknown", full_name or "")
-                )
-                conn.commit()
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _add)
-    except Exception as e:
-        print(f"⚠️ Database error: {e}")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: sqlite3.connect(DB_FILE)
+        .execute(
+            "INSERT OR IGNORE INTO users(user_id, username, full_name) VALUES(?,?,?)",
+            (user_id, username, full_name),
+        )
+        .connection.commit(),
+    )
 
 async def get_all_users() -> List[int]:
-    try:
-        def _get():
-            with closing(sqlite3.connect(DB_FILE)) as conn:
-                return [row[0] for row in conn.execute("SELECT user_id FROM users").fetchall()]
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _get)
-    except Exception as e:
-        print(f"⚠️ Database error: {e}")
-        return []
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: [
+            row[0]
+            for row in sqlite3.connect(DB_FILE)
+            .execute("SELECT user_id FROM users")
+            .fetchall()
+        ],
+    )
 
-# ===== INSTAGRAM VIDEO DOWNLOAD (USING PARTH-DL) =====
-
-async def get_instagram_video_url(instagram_url: str) -> str | None:
-    """
-    Get video URL using parth-dl (No login, No API Key needed)
-    """
+# Download video with progress
+async def download_with_progress(url: str, msg: Message, label: str) -> bytes | None:
     try:
-        if not instagram_url.startswith('http'):
-            instagram_url = 'https://' + instagram_url
-        
-        print(f"📥 Fetching: {instagram_url}")
-        
-        # ✅ Use parth-dl to get video info
-        info = await asyncio.to_thread(instagram_downloader.get_info, instagram_url)
-        
-        if info:
-            # Try to get video URL
-            video_url = info.get('video_url')
-            if video_url:
-                print(f"✅ Video found: {video_url[:100]}...")
-                return video_url
-            
-            # If no video_url, try other fields
-            if info.get('videos'):
-                videos = info.get('videos')
-                if isinstance(videos, list) and videos:
-                    return videos[0].get('url')
-                elif isinstance(videos, dict):
-                    return videos.get('url')
-            
-            # If it's a carousel, get first video
-            if info.get('carousel_media'):
-                for item in info.get('carousel_media', []):
-                    if item.get('video_url'):
-                        return item.get('video_url')
-        
-        return None
-        
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return None
+                total = int(resp.headers.get("content-length", 0))
+                if total == 0:
+                    return None
+                chunks = b""
+                start = time.time()
+                last_update = 0
+                done = 0
+                async for chunk in resp.aiter_bytes(1024 * 64):
+                    chunks += chunk
+                    done += len(chunk)
+                    now = time.time()
+                    if now - last_update >= 2 and total > 0:
+                        last_update = now
+                        pct = int(done * 100 / total)
+                        elapsed = now - start
+                        eta = (total - done) * elapsed / done if done else 0
+                        eta_str = f"{int(eta)}s" if eta < 3600 else f"{int(eta//60)}m"
+                        try:
+                            await msg.edit_text(f"{label} {pct}%  ETA: {eta_str}")
+                        except Exception:
+                            pass
+                return chunks
     except Exception as e:
-        print(f"⚠️ Error fetching video: {e}")
+        print(f"Download error: {e}")
         return None
 
-async def generate_download_link(instagram_url: str) -> str | None:
-    """Generate download link using parth-dl"""
-    try:
-        video_url = await get_instagram_video_url(instagram_url)
-        if not video_url:
-            return None
-        
-        # Clean URL
-        video_url = video_url.replace('\\/', '/')
-        if video_url.startswith('//'):
-            video_url = 'https:' + video_url
-        
-        encoded_url = quote(video_url, safe='')
-        return f"{WEB_URL}/download?url={encoded_url}"
-    except Exception as e:
-        print(f"⚠️ Error generating link: {e}")
-        return None
+# Initialize bot
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher()
 
-# ===== TELEGRAM BOT =====
-try:
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    print("✅ Bot created")
-except Exception as e:
-    print(f"❌ Bot creation failed: {e}")
-    sys.exit(1)
-
-# ===== COMMANDS =====
-
+# Start command
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     await add_user(
         message.from_user.id,
         message.from_user.username,
-        message.from_user.full_name or ""
+        message.from_user.full_name or "",
     )
-    
     await message.answer(
-        "🎬 <b>Instagram Video Downloader Bot</b>\n\n"
-        "मुझे कोई भी Instagram URL भेजें और मैं आपको डाउनलोड लिंक दूंगा!\n\n"
-        "<b>📌 कैसे उपयोग करें:</b>\n"
-        "1️⃣ Instagram से Reel/Post का URL कॉपी करें\n"
-        "2️⃣ यहां पेस्ट करें और भेजें\n"
-        "3️⃣ मैं डाउनलोड लिंक जनरेट करूंगा\n"
-        "4️⃣ <b>लिंक पर क्लिक करें → वीडियो डाउनलोड होगा</b>\n\n"
-        "<b>✅ Supported:</b>\n"
-        "• Reels (reel/)\n"
-        "• Posts (p/)\n"
-        "• Videos (tv/)\n\n"
-        "<b>⚠️ Note:</b>\n"
-        "सिर्फ <b>पब्लिक</b> पोस्ट काम करती हैं!"
+        "🎬 <b>Instagram Downloader Bot</b>\n\n"
+        "Send me any Instagram link and I'll download the video for you!\n\n"
+        "<b>Supported URLs:</b>\n"
+        "📹 Instagram Reels\n"
+        "📸 Instagram Posts\n"
+        "🎥 Instagram Videos\n\n"
+        "<b>How to use:</b>\n"
+        "1. Copy Instagram URL\n"
+        "2. Paste and send here\n"
+        "3. Wait for download\n\n"
+        "⚠️ Only public videos work!"
     )
 
+# Help command
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     await message.answer(
         "📖 <b>Help Guide</b>\n\n"
         "<b>Commands:</b>\n"
-        "/start - बॉट शुरू करें\n"
-        "/help - यह हेल्प दिखाएं\n\n"
-        "<b>📤 भेजें:</b>\n"
-        "• Instagram Reel URL\n"
-        "• Instagram Post URL\n"
-        "• Instagram Video URL\n\n"
-        "<b>उदाहरण:</b>\n"
-        "<code>https://www.instagram.com/reel/ABC123/</code>\n"
-        "<code>https://www.instagram.com/p/DEF456/</code>\n\n"
-        "<b>💡 Tip:</b>\n"
-        "अगर वीडियो नहीं मिलता, तो पोस्ट पब्लिक है या नहीं चेक करें।"
+        "/start - Start the bot\n"
+        "/help - Show this help\n"
+        "/stats - Show user stats (Admin only)\n"
+        "/bcast - Broadcast message (Admin only)\n\n"
+        "<b>Supported Links:</b>\n"
+        "• https://www.instagram.com/reel/...\n"
+        "• https://www.instagram.com/p/...\n"
+        "• https://www.instagram.com/tv/...\n\n"
+        "Just send any Instagram link and I'll handle the rest! 🚀"
     )
 
+# Stats command (admin only)
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ आपको इस कमांड का उपयोग करने की अनुमति नहीं है।")
+        await message.answer("⛔ You are not authorized to use this command.")
         return
     users = await get_all_users()
     await message.answer(f"📊 <b>Total Users:</b> <code>{len(users)}</code>")
 
+# Broadcast command (admin only)
+@dp.message(Command("bcast"))
+async def cmd_bcast(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⛔ You are not authorized to use this command.")
+        return
+    text = message.text.partition(" ")[2]
+    if not text:
+        await message.answer("Usage: <code>/bcast Your message here</code>")
+        return
+    users = await get_all_users()
+    sent = 0
+    for uid in users:
+        try:
+            await bot.send_message(uid, text)
+            sent += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            pass
+    await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
+
+# Main handler - Instagram URL (Using Web Scraping)
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
     
-    patterns = [
+    # Check if it's an Instagram URL
+    instagram_patterns = [
         r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[A-Za-z0-9_-]+',
-        r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/[A-Za-z0-9_.]+\/?$',
+        r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/[A-Za-z0-9_.]+\/?$'
     ]
     
-    if not any(re.search(p, text, re.IGNORECASE) for p in patterns):
+    is_instagram = any(re.search(pattern, text) for pattern in instagram_patterns)
+    
+    if not is_instagram:
         return
     
-    wait_msg = await message.reply("⏳ <b>डाउनलोड लिंक जनरेट हो रहा है...</b>")
+    wait_msg = await message.reply("⏳ <b>Fetching media via web scraping...</b>")
     
     try:
-        download_link = await generate_download_link(text)
+        # Using parth-dl for web scraping
+        info = await asyncio.to_thread(insta_dl.get_info, text)
         
-        if not download_link:
-            await wait_msg.edit_text(
-                "❌ <b>Error:</b> वीडियो नहीं मिला!\n\n"
-                "⚠️ सुनिश्चित करें:\n"
-                "• URL सही है\n"
-                "• पोस्ट <b>पब्लिक</b> है\n"
-                "• वीडियो मौजूद है"
-            )
+        if not info or not info.get("url"):
+            await wait_msg.edit_text("❌ <b>Error:</b> Could not fetch media. Make sure the URL is public.")
             return
         
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="⬇️ वीडियो डाउनलोड करें",
-                    url=download_link
-                )]
-            ]
-        )
+        # Get best video URL
+        video_url = info.get("url")
+        if not video_url:
+            await wait_msg.edit_text("❌ <b>Error:</b> No video found in this post.")
+            return
         
-        await wait_msg.edit_text(
-            f"✅ <b>वीडियो मिल गया!</b>\n\n"
-            f"📹 <b>डाउनलोड करने के लिए नीचे बटन पर क्लिक करें:</b>\n\n"
-            f"🔗 <i>लिंक क्लिक करते ही डाउनलोड शुरू हो जाएगा</i>",
-            reply_markup=keyboard
-        )
+        # Download video with progress
+        await wait_msg.edit_text("📥 <b>Downloading video...</b>")
+        video_bytes = await download_with_progress(video_url, wait_msg, "📥 Downloading")
         
+        if not video_bytes:
+            await wait_msg.edit_text("❌ <b>Error:</b> Download failed. Please try again.")
+            return
+        
+        await wait_msg.edit_text("📤 <b>Uploading video...</b>")
+        
+        # Get caption if available
+        caption = info.get("caption", "")
+        if caption:
+            caption = caption[:200] + "..." if len(caption) > 200 else caption
+        
+        video_file = BufferedInputFile(video_bytes, filename="instagram_video.mp4")
+        
+        try:
+            await message.reply_video(
+                video_file,
+                caption=f"📹 <b>Downloaded Successfully!</b>\n\n{caption}" if caption else "✅ <b>Video Downloaded!</b>",
+                supports_streaming=True
+            )
+            await wait_msg.delete()
+        except Exception as e:
+            if "message is too long" in str(e).lower() or "file is too big" in str(e).lower():
+                await wait_msg.edit_text("📦 <b>Video is large, sending as file...</b>")
+                await message.reply_document(
+                    video_file,
+                    caption="📹 <b>Video Downloaded!</b>"
+                )
+                await wait_msg.delete()
+            else:
+                raise e
+                
     except Exception as e:
-        await wait_msg.edit_text(f"❌ <b>Error:</b> {str(e)[:100]}")
+        error_msg = str(e)
+        if "413" in error_msg or "too large" in error_msg.lower():
+            await wait_msg.edit_text("❌ <b>Error:</b> Video file is too large (>50MB). Telegram limit exceeded.")
+        elif "404" in error_msg:
+            await wait_msg.edit_text("❌ <b>Error:</b> Video not found. The post might be deleted or private.")
+        else:
+            await wait_msg.edit_text(f"❌ <b>Error:</b> Something went wrong. Please try again.\n\n<code>{error_msg[:100]}</code>")
+        print(f"Error in handle_instagram_url: {e}")
 
-# ===== MAIN =====
+# Main function
 async def main():
-    print("=" * 50)
-    print("🚀 Bot is running...")
-    print("=" * 50)
-    
+    print("🤖 Bot starting...")
+    print("📦 Using Instagram Downloader (Web Scraping)")
     init_db()
-    
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        print("✅ Webhook cleared")
-        
-        await dp.start_polling(
-            bot,
-            polling_timeout=30,
-            allowed_updates=["message", "callback_query"]
-        )
-    except Exception as e:
-        print(f"❌ Bot error: {e}")
-    finally:
-        await bot.session.close()
-        print("✅ Bot session closed")
+    print("✅ Database initialized")
+    print(f"📊 Admin IDs: {ADMIN_IDS}")
+    print("🚀 Bot is running...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("⚠️ Bot stopped")
+    asyncio.run(main())
