@@ -1,16 +1,13 @@
 services:
   - type: worker
     name: instagram-bot
-    runtime: docker
-    repo: https://github.com/Junaidkhan1234567/Instagram-Downloader-Bot
-    branch: 3rd-party
-    dockerfilePath: ./Dockerfile
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py  # ✅ bot.py se main.py karein
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: BOT_TOKEN
         sync: false
       - key: ADMIN_IDS
         sync: false
-      - key: API_URL
-        value: https://vkrdownloader.xyz/server/
-      - key: API_KEY
-        value: vkrdownloader
