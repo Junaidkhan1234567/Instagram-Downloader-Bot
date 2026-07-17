@@ -3,11 +3,15 @@ services:
     name: instagram-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python3 main.py  # Changed from bot.py to main.py
+    startCommand: python3 main.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: BOT_TOKEN
-        sync: false
+        value: "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0"    # <-- यहां अपना Token डालें
       - key: ADMIN_IDS
-        sync: false
+        value: "1383239349"     # <-- यहां अपनी ID डालें
+      - key: API_URL
+        value: "https://vkrdownloader.xyz/server/"
+      - key: API_KEY
+        value: "vkrdownloader"
