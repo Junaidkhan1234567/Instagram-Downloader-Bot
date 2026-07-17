@@ -11,10 +11,11 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.enums.parse_mode import ParseMode
-from aiogram.client.bot import DefaultBotProperties
+# ✅ FIX: Correct import path
+from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
-# ✅ Setup logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -28,7 +29,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
 DB_FILE = "users.db"
 
-# ============= INSTAGRAM VIDEO SCRAPING =============
+# ============= INSTAGRAM SCRAPING =============
 
 async def fetch_instagram_video(url: str) -> dict | None:
     """Fetch Instagram video URL using multiple methods"""
@@ -45,10 +46,10 @@ async def fetch_instagram_video(url: str) -> dict | None:
                 if thumbnail:
                     video_url = thumbnail.replace(".jpg", ".mp4").replace("_n.jpg", "_n.mp4")
                     if video_url != thumbnail:
-                        logger.info(f"Found video via oEmbed: {video_url[:50]}...")
+                        logger.info(f"Found video via oEmbed")
                         return {"url": video_url, "caption": data.get("title", "Instagram Video")}
         
-        # Method 2: Direct page scraping
+        # Method 2: Direct scraping
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -67,7 +68,7 @@ async def fetch_instagram_video(url: str) -> dict | None:
                     if matches:
                         for match in matches:
                             if match and '.mp4' in match:
-                                logger.info(f"Found video via scraping: {match[:50]}...")
+                                logger.info(f"Found video via scraping")
                                 return {"url": match, "caption": "Instagram Video"}
         
         logger.warning(f"No video found for URL: {url}")
@@ -149,13 +150,16 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
 
 # ============= TELEGRAM BOT =============
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# ✅ FIX: Correct bot initialization
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 
-# ✅ /start command - Bot response check
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
-    logger.info(f"✅ /start received from user: {message.from_user.id}")
+    logger.info(f"✅ /start from user: {message.from_user.id}")
     await add_user(
         message.from_user.id,
         message.from_user.username,
@@ -168,17 +172,11 @@ async def cmd_start(message: Message):
         "📹 Instagram Reels\n"
         "📸 Instagram Posts\n"
         "🎥 Instagram Videos\n\n"
-        "<b>How to use:</b>\n"
-        "1. Copy Instagram URL\n"
-        "2. Paste and send here\n"
-        "3. Wait for download\n\n"
         "⚠️ Only public videos work!"
     )
 
-# ✅ Help command
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
-    logger.info(f"✅ /help received from user: {message.from_user.id}")
     await message.answer(
         "📖 <b>Help Guide</b>\n\n"
         "<b>Commands:</b>\n"
@@ -186,27 +184,21 @@ async def cmd_help(message: Message):
         "/help - Show this help\n"
         "/stats - Show user stats (Admin only)\n"
         "/bcast - Broadcast message (Admin only)\n\n"
-        "<b>Supported Links:</b>\n"
-        "• https://www.instagram.com/reel/...\n"
-        "• https://www.instagram.com/p/...\n"
-        "• https://www.instagram.com/tv/...\n\n"
         "Just send any Instagram link and I'll handle the rest! 🚀"
     )
 
-# ✅ Stats command
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ You are not authorized to use this command.")
+        await message.answer("⛔ You are not authorized.")
         return
     users = await get_all_users()
     await message.answer(f"📊 <b>Total Users:</b> <code>{len(users)}</code>")
 
-# ✅ Broadcast command
 @dp.message(Command("bcast"))
 async def cmd_bcast(message: Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ You are not authorized to use this command.")
+        await message.answer("⛔ You are not authorized.")
         return
     text = message.text.partition(" ")[2]
     if not text:
@@ -223,11 +215,10 @@ async def cmd_bcast(message: Message):
             pass
     await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
 
-# ✅ Main handler - Instagram URL
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
-    logger.info(f"📩 Message received from {message.from_user.id}: {text[:50]}...")
+    logger.info(f"📩 Message from {message.from_user.id}: {text[:50]}...")
     
     # Check if it's an Instagram URL
     instagram_patterns = [
@@ -238,17 +229,16 @@ async def handle_instagram_url(message: Message):
     is_instagram = any(re.search(pattern, text) for pattern in instagram_patterns)
     
     if not is_instagram:
-        logger.info(f"⏭️ Not an Instagram URL, ignoring")
+        logger.info(f"⏭️ Not an Instagram URL")
         return
     
-    logger.info(f"🔍 Processing Instagram URL: {text}")
+    logger.info(f"🔍 Processing Instagram URL")
     wait_msg = await message.reply("⏳ <b>Fetching media...</b>")
     
     try:
         result = await fetch_instagram_video(text)
         
         if not result or not result.get("url"):
-            logger.warning(f"❌ No video found for: {text}")
             await wait_msg.edit_text(
                 "❌ <b>Error:</b> Could not fetch media.\n\n"
                 "Possible reasons:\n"
@@ -261,13 +251,12 @@ async def handle_instagram_url(message: Message):
         
         video_url = result["url"]
         caption = result.get("caption", "Instagram Video")
-        logger.info(f"✅ Video found: {video_url[:50]}...")
+        logger.info(f"✅ Video found")
         
         await wait_msg.edit_text("📥 <b>Downloading video...</b>")
         video_bytes = await download_with_progress(video_url, wait_msg, "📥 Downloading")
         
         if not video_bytes:
-            logger.error(f"❌ Download failed for: {video_url}")
             await wait_msg.edit_text("❌ <b>Error:</b> Download failed. Please try again.")
             return
         
@@ -285,7 +274,7 @@ async def handle_instagram_url(message: Message):
             supports_streaming=True
         )
         await wait_msg.delete()
-        logger.info(f"✅ Video sent to user: {message.from_user.id}")
+        logger.info(f"✅ Video sent to user")
                 
     except Exception as e:
         logger.error(f"❌ Error: {e}")
@@ -296,7 +285,6 @@ async def handle_instagram_url(message: Message):
 async def main():
     logger.info("🤖 Bot starting...")
     logger.info(f"📊 BOT_TOKEN: {BOT_TOKEN[:10]}... (length: {len(BOT_TOKEN) if BOT_TOKEN else 0})")
-    logger.info(f"📊 ADMIN_IDS: {ADMIN_IDS}")
     
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN is not set!")
@@ -316,7 +304,6 @@ async def main():
         logger.info(f"🆔 Bot ID: {me.id}")
     except Exception as e:
         logger.error(f"❌ Bot connection failed: {e}")
-        logger.error("   Please check your BOT_TOKEN")
         return
     
     logger.info("🚀 Bot is running and polling...")
