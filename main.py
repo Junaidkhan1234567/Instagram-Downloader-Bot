@@ -3,6 +3,7 @@ import os
 import sqlite3
 import time
 import re
+import json
 from contextlib import closing
 from typing import List
 import httpx
@@ -13,9 +14,6 @@ from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
-# Web scraping library for Instagram
-from parth_dl import InstagramDownloader
-
 load_dotenv()
 
 # Configuration
@@ -23,8 +21,182 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
 DB_FILE = "users.db"
 
-# Initialize Instagram Downloader (No API key needed!)
-insta_dl = InstagramDownloader()
+# ============= WEB SCRAPING FUNCTIONS =============
+
+async def extract_video_from_html(html: str) -> str | None:
+    """
+    Extract video URL from Instagram page HTML using multiple patterns
+    """
+    patterns = [
+        # Pattern 1: Direct .mp4 URL
+        r'(https?://[^\s"\']+\.mp4[^\s"\']*)',
+        
+        # Pattern 2: Video URL with query params
+        r'(https?://[^\s"\']+video[^\s"\']+\.mp4[^\s"\']*)',
+        
+        # Pattern 3: Instagram CDN video URL
+        r'(https?://[^\s"\']+cdninstagram\.com[^\s"\']+\.mp4[^\s"\']*)',
+        
+        # Pattern 4: Video URL in JSON
+        r'"video_url"\s*:\s*"([^"]+)"',
+        
+        # Pattern 5: Video URL in content attribute
+        r'"content"\s*:\s*"([^"]+\.mp4[^"]*)"',
+        
+        # Pattern 6: Another video pattern
+        r'"videoUrl"\s*:\s*"([^"]+)"',
+        
+        # Pattern 7: Media URL pattern
+        r'"media_url"\s*:\s*"([^"]+\.mp4[^"]*)"',
+        
+        # Pattern 8: HD video URL
+        r'"video_versions"\s*:\s*\[[^\]]*"url"\s*:\s*"([^"]+)"',
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, html)
+        if matches:
+            # Return first valid URL
+            for url in matches:
+                if url and '.mp4' in url:
+                    return url
+    
+    return None
+
+async def extract_video_from_json(html: str) -> str | None:
+    """
+    Extract video URL from JSON embedded in page
+    """
+    # Find JSON data in script tags
+    json_patterns = [
+        r'<script type="application/json"[^>]*>(.*?)</script>',
+        r'<script[^>]*data-js[^>]*>(.*?)</script>',
+        r'window\._sharedData\s*=\s*({.*?});',
+        r'window\.__additionalDataLoaded\s*\([^,]+,\s*({.*?})\);',
+    ]
+    
+    for json_pattern in json_patterns:
+        matches = re.findall(json_pattern, html, re.DOTALL)
+        for json_str in matches:
+            try:
+                data = json.loads(json_str)
+                # Recursive search for video URL
+                def search_video(obj):
+                    if isinstance(obj, dict):
+                        for key, value in obj.items():
+                            # Check for video URL keys
+                            if key in ['video_url', 'videoUrl', 'url', 'display_url', 'media_url']:
+                                if isinstance(value, str) and '.mp4' in value:
+                                    return value
+                            # Search nested
+                            result = search_video(value)
+                            if result:
+                                return result
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            result = search_video(item)
+                            if result:
+                                return result
+                    return None
+                
+                video_url = search_video(data)
+                if video_url:
+                    return video_url
+            except:
+                continue
+    
+    return None
+
+async def fetch_instagram_video_web_scrape(url: str) -> dict | None:
+    """
+    Main web scraping function to fetch Instagram video URL
+    """
+    try:
+        # Headers to mimic real browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+        }
+        
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            # Step 1: Get the page HTML
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return None
+            
+            html = resp.text
+            
+            # Step 2: Try to extract video URL from HTML
+            video_url = await extract_video_from_html(html)
+            if video_url:
+                return {
+                    "url": video_url,
+                    "caption": await extract_caption(html)
+                }
+            
+            # Step 3: Try to extract from JSON
+            video_url = await extract_video_from_json(html)
+            if video_url:
+                return {
+                    "url": video_url,
+                    "caption": await extract_caption(html)
+                }
+            
+            # Step 4: Try using oEmbed API
+            oembed_url = f"https://api.instagram.com/oembed?url={url}"
+            resp = await client.get(oembed_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                # oEmbed gives thumbnail, but we need video URL
+                # Try to get video from thumbnail URL
+                thumbnail = data.get("thumbnail_url", "")
+                if thumbnail:
+                    # Try to convert thumbnail to video URL
+                    video_url = thumbnail.replace(".jpg", ".mp4").replace("_n.jpg", "_n.mp4")
+                    if video_url != thumbnail:
+                        return {
+                            "url": video_url,
+                            "caption": data.get("title", "")
+                        }
+            
+            return None
+            
+    except Exception as e:
+        print(f"Web scraping error: {e}")
+        return None
+
+async def extract_caption(html: str) -> str:
+    """
+    Extract caption/title from Instagram page
+    """
+    patterns = [
+        r'<meta property="og:title" content="([^"]+)"',
+        r'<title>([^<]+)</title>',
+        r'"caption"\s*:\s*"([^"]+)"',
+        r'"text"\s*:\s*"([^"]+)"',
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, html)
+        if matches:
+            caption = matches[0]
+            # Clean up caption
+            caption = re.sub(r'<[^>]+>', '', caption)
+            caption = re.sub(r'\s+', ' ', caption)
+            return caption.strip()
+    
+    return "Instagram Video"
+
+# ============= TELEGRAM BOT CODE =============
 
 # Initialize database
 def init_db():
@@ -115,7 +287,8 @@ async def cmd_start(message: Message):
         "1. Copy Instagram URL\n"
         "2. Paste and send here\n"
         "3. Wait for download\n\n"
-        "⚠️ Only public videos work!"
+        "⚠️ Only public videos work!\n\n"
+        "⚡ Using Pure Web Scraping (No API Key Required)"
     )
 
 # Help command
@@ -165,7 +338,7 @@ async def cmd_bcast(message: Message):
             pass
     await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
 
-# Main handler - Instagram URL (Using Web Scraping)
+# Main handler - Instagram URL (Pure Web Scraping)
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
@@ -184,18 +357,22 @@ async def handle_instagram_url(message: Message):
     wait_msg = await message.reply("⏳ <b>Fetching media via web scraping...</b>")
     
     try:
-        # Using parth-dl for web scraping
-        info = await asyncio.to_thread(insta_dl.get_info, text)
+        # Web scraping to get video URL
+        result = await fetch_instagram_video_web_scrape(text)
         
-        if not info or not info.get("url"):
-            await wait_msg.edit_text("❌ <b>Error:</b> Could not fetch media. Make sure the URL is public.")
+        if not result or not result.get("url"):
+            await wait_msg.edit_text(
+                "❌ <b>Error:</b> Could not fetch media.\n\n"
+                "Possible reasons:\n"
+                "• URL might be private\n"
+                "• Post might be deleted\n"
+                "• Instagram changed their page structure\n\n"
+                "Try again with a public reel/post."
+            )
             return
         
-        # Get best video URL
-        video_url = info.get("url")
-        if not video_url:
-            await wait_msg.edit_text("❌ <b>Error:</b> No video found in this post.")
-            return
+        video_url = result["url"]
+        caption = result.get("caption", "Instagram Video")
         
         # Download video with progress
         await wait_msg.edit_text("📥 <b>Downloading video...</b>")
@@ -207,8 +384,7 @@ async def handle_instagram_url(message: Message):
         
         await wait_msg.edit_text("📤 <b>Uploading video...</b>")
         
-        # Get caption if available
-        caption = info.get("caption", "")
+        # Clean caption
         if caption:
             caption = caption[:200] + "..." if len(caption) > 200 else caption
         
@@ -236,8 +412,6 @@ async def handle_instagram_url(message: Message):
         error_msg = str(e)
         if "413" in error_msg or "too large" in error_msg.lower():
             await wait_msg.edit_text("❌ <b>Error:</b> Video file is too large (>50MB). Telegram limit exceeded.")
-        elif "404" in error_msg:
-            await wait_msg.edit_text("❌ <b>Error:</b> Video not found. The post might be deleted or private.")
         else:
             await wait_msg.edit_text(f"❌ <b>Error:</b> Something went wrong. Please try again.\n\n<code>{error_msg[:100]}</code>")
         print(f"Error in handle_instagram_url: {e}")
@@ -245,7 +419,7 @@ async def handle_instagram_url(message: Message):
 # Main function
 async def main():
     print("🤖 Bot starting...")
-    print("📦 Using Instagram Downloader (Web Scraping)")
+    print("📦 Using Pure Web Scraping (No API Key)")
     init_db()
     print("✅ Database initialized")
     print(f"📊 Admin IDs: {ADMIN_IDS}")
