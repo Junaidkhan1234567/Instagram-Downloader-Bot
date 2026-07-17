@@ -1,6 +1,19 @@
 services:
+  # Telegram Bot - Worker
+  - type: worker
+    name: instagram-telegram-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+
+  # Web Interface - Web Service
   - type: web
-    name: instagram-downloader-web
+    name: instagram-web-downloader
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn web:app
