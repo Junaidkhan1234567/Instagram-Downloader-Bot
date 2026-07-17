@@ -16,69 +16,89 @@ from urllib.parse import quote
 
 load_dotenv()
 
-# Configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0")
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
-WEB_URL = os.getenv("WEB_URL", "https://instagram-downloader-bot-rcuj.onrender.com")  # ⚠️ अपना Web URL डालें
+# ===== CONFIGURATION =====
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
+WEB_URL = os.getenv("WEB_URL", "https://instagram-downloader-web.onrender.com")
+API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
+API_KEY = os.getenv("API_KEY", "vkrdownloader")
 DB_FILE = "users.db"
 
-# Initialize database
+# Validate required config
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN not set! Please add it to .env file")
+
+# ===== DATABASE =====
 def init_db():
+    """Initialize SQLite database"""
     with closing(sqlite3.connect(DB_FILE)) as conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY, username TEXT, full_name TEXT, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
         )
         conn.commit()
 
-# Database functions
 async def add_user(user_id: int, username: str | None, full_name: str):
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        None,
-        lambda: sqlite3.connect(DB_FILE)
-        .execute(
-            "INSERT OR IGNORE INTO users(user_id, username, full_name) VALUES(?,?,?)",
-            (user_id, username, full_name),
-        )
-        .connection.commit(),
-    )
+    """Add user to database if not exists"""
+    try:
+        def _add():
+            with closing(sqlite3.connect(DB_FILE)) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO users(user_id, username, full_name) VALUES(?,?,?)",
+                    (user_id, username or "Unknown", full_name or "")
+                )
+                conn.commit()
+        
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _add)
+    except Exception as e:
+        print(f"⚠️ Database error (add_user): {e}")
 
 async def get_all_users() -> List[int]:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: [
-            row[0]
-            for row in sqlite3.connect(DB_FILE)
-            .execute("SELECT user_id FROM users")
-            .fetchall()
-        ],
-    )
-
-# Generate download link function
-async def generate_download_link(instagram_url: str) -> str | None:
-    """Instagram URL से डाउनलोड लिंक जनरेट करें"""
-    params = {"api_key": API_KEY, "vkr": instagram_url}
+    """Get all user IDs from database"""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        def _get():
+            with closing(sqlite3.connect(DB_FILE)) as conn:
+                return [row[0] for row in conn.execute("SELECT user_id FROM users").fetchall()]
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get)
+    except Exception as e:
+        print(f"⚠️ Database error (get_all_users): {e}")
+        return []
+
+# ===== INSTAGRAM DOWNLOAD LINK GENERATOR =====
+async def generate_download_link(instagram_url: str) -> str | None:
+    """Generate download link using VKR API"""
+    params = {"api_key": API_KEY, "vkr": instagram_url}
+    
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.get(API_URL, params=params)
+            
             if resp.status_code != 200:
-                return None
-            data = resp.json()
-            if not data.get("data") or not data["data"].get("downloads"):
+                print(f"⚠️ API Error: Status {resp.status_code}")
                 return None
             
-            # Best video URL ढूंढें
+            data = resp.json()
+            
+            if not data.get("data") or not data["data"].get("downloads"):
+                print("⚠️ No downloads found in API response")
+                return None
+            
+            # Find best video quality
             best_video = None
             best_quality = 0
+            
             for item in data["data"]["downloads"]:
                 url = item.get("url")
                 if not url:
                     continue
-                ext = (item.get("ext") or "mp4").lower()
-                if ext in {"mp4", "webm"}:
+                
+                ext = (item.get("ext") or "").lower()
+                if ext in {"mp4", "webm", "mov"}:
                     quality_str = item.get("quality", "unknown")
                     quality_score = 0
+                    
                     if "1080" in quality_str:
                         quality_score = 3
                     elif "720" in quality_str:
@@ -90,29 +110,40 @@ async def generate_download_link(instagram_url: str) -> str | None:
                         best_quality = quality_score
                         best_video = url
             
+            # If no video found, try to get any download URL
             if not best_video:
+                for item in data["data"]["downloads"]:
+                    if item.get("url"):
+                        best_video = item["url"]
+                        break
+            
+            if not best_video:
+                print("⚠️ No video URL found")
                 return None
             
-            # Web Server पर URL encode करके भेजें
+            # Encode URL and create web link
             encoded_url = quote(best_video, safe='')
             download_link = f"{WEB_URL}/download?url={encoded_url}"
             return download_link
             
+    except httpx.TimeoutException:
+        print("⚠️ API Timeout")
+        return None
     except Exception as e:
-        print(f"Error generating link: {e}")
+        print(f"⚠️ Error generating link: {e}")
         return None
 
-# Initialize bot
+# ===== TELEGRAM BOT =====
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Start command
+# ---- START COMMAND ----
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
     await add_user(
         message.from_user.id,
         message.from_user.username,
-        message.from_user.full_name or "",
+        message.from_user.full_name or ""
     )
     
     welcome_text = """
@@ -136,7 +167,7 @@ async def cmd_start(message: Message):
 """
     await message.answer(welcome_text)
 
-# Help command
+# ---- HELP COMMAND ----
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     help_text = """
@@ -163,7 +194,7 @@ async def cmd_help(message: Message):
 """
     await message.answer(help_text)
 
-# Stats command (admin only)
+# ---- STATS COMMAND (Admin Only) ----
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -172,33 +203,46 @@ async def cmd_stats(message: Message):
     users = await get_all_users()
     await message.answer(f"📊 <b>Total Users:</b> <code>{len(users)}</code>")
 
-# Broadcast command (admin only)
+# ---- BROADCAST COMMAND (Admin Only) ----
 @dp.message(Command("bcast"))
 async def cmd_bcast(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ आपको इस कमांड का उपयोग करने की अनुमति नहीं है।")
         return
+    
     text = message.text.partition(" ")[2]
     if not text:
         await message.answer("Usage: <code>/bcast Your message here</code>")
         return
+    
     users = await get_all_users()
+    if not users:
+        await message.answer("❌ No users found in database.")
+        return
+    
     sent = 0
+    failed = 0
+    
     for uid in users:
         try:
             await bot.send_message(uid, text)
             sent += 1
-            await asyncio.sleep(0.05)
-        except Exception:
-            pass
-    await message.answer(f"✅ Broadcast sent to <b>{sent}</b> users.")
+            await asyncio.sleep(0.05)  # Avoid rate limiting
+        except Exception as e:
+            failed += 1
+            print(f"⚠️ Failed to send to {uid}: {e}")
+    
+    await message.answer(
+        f"✅ Broadcast sent to <b>{sent}</b> users.\n"
+        f"❌ Failed: <b>{failed}</b>"
+    )
 
-# Main handler - Instagram URL
+# ---- INSTAGRAM URL HANDLER ----
 @dp.message(F.text)
 async def handle_instagram_url(message: Message):
     text = message.text.strip()
     
-    # Instagram URL check
+    # Instagram URL patterns
     instagram_patterns = [
         r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/(?:reel|p|tv)\/[A-Za-z0-9_-]+',
         r'(?:https?:\/\/)?(?:www\.)?instagram\.com\/[A-Za-z0-9_.]+\/?$'
@@ -213,7 +257,6 @@ async def handle_instagram_url(message: Message):
     wait_msg = await message.reply("⏳ <b>डाउनलोड लिंक जनरेट हो रहा है...</b>")
     
     try:
-        # Generate download link
         download_link = await generate_download_link(text)
         
         if not download_link:
@@ -236,7 +279,6 @@ async def handle_instagram_url(message: Message):
             ]
         )
         
-        # Send message with download button
         await wait_msg.edit_text(
             f"✅ <b>वीडियो मिल गया!</b>\n\n"
             f"📹 <b>डाउनलोड करने के लिए नीचे बटन पर क्लिक करें:</b>\n\n"
@@ -249,17 +291,24 @@ async def handle_instagram_url(message: Message):
             f"❌ <b>Error:</b> कुछ गलत हो गया!\n\n"
             f"<code>{str(e)[:100]}</code>"
         )
-        print(f"Error: {e}")
+        print(f"⚠️ Error in handler: {e}")
 
-# Main function
+# ===== MAIN =====
 async def main():
     print("🤖 Bot starting...")
     init_db()
     print("✅ Database initialized")
     print(f"📊 Admin IDs: {ADMIN_IDS}")
     print(f"🌐 Web URL: {WEB_URL}")
+    print(f"🔑 API URL: {API_URL}")
     print("🚀 Bot is running...")
-    await dp.start_polling(bot)
+    
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
