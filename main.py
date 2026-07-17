@@ -19,7 +19,7 @@ try:
     YT_DLP_AVAILABLE = True
 except ImportError:
     YT_DLP_AVAILABLE = False
-    print("⚠️ yt-dlp not installed. Install with: pip install yt-dlp")
+    print("⚠️ yt-dlp not available")
 
 load_dotenv()
 
