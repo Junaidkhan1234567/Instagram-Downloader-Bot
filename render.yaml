@@ -3,7 +3,7 @@ services:
     name: instagram-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python3 bot.py  # ✅ bot.py se main.py karein
+    startCommand: python3 main.py  # Changed from bot.py to main.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
