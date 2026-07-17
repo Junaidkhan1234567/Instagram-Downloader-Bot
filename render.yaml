@@ -2,5 +2,15 @@ services:
   - type: worker
     name: instagram-bot
     runtime: python
+    pythonVersion: 3.11.0
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: API_URL
+        value: https://vkrdownloader.xyz/server/
+      - key: API_KEY
+        value: vkrdownloader
