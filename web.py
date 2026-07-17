@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 app = Flask(__name__)
 
-# HTML Template for download page
+# HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -15,11 +15,7 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Instagram Video Downloader</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -38,26 +34,10 @@ HTML_TEMPLATE = """
             width: 100%;
             text-align: center;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            animation: slideUp 0.5s ease;
         }
-        @keyframes slideUp {
-            from { opacity: 0; transform: translateY(30px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .icon {
-            font-size: 60px;
-            margin-bottom: 20px;
-        }
-        h1 {
-            color: #333;
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 16px;
-        }
+        .icon { font-size: 60px; margin-bottom: 20px; }
+        h1 { color: #333; font-size: 28px; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 16px; }
         .spinner {
             width: 50px;
             height: 50px;
@@ -90,25 +70,9 @@ HTML_TEMPLATE = """
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(40,167,69,0.3);
         }
-        .error {
-            color: #dc3545;
-            background: #f8d7da;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-        }
-        .success {
-            color: #28a745;
-            margin: 15px 0;
-        }
-        .hidden {
-            display: none;
-        }
-        .footer {
-            margin-top: 20px;
-            color: #999;
-            font-size: 12px;
-        }
+        .error { color: #dc3545; background: #f8d7da; padding: 15px; border-radius: 8px; margin: 15px 0; }
+        .hidden { display: none; }
+        .footer { margin-top: 20px; color: #999; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -120,24 +84,15 @@ HTML_TEMPLATE = """
         <div id="loading">
             <div class="spinner"></div>
             <p>⏳ <b>डाउनलोड शुरू हो रहा है...</b></p>
-            <p style="color: #666; font-size: 14px; margin-top: 10px;">
-                कृपया कुछ सेकंड इंतज़ार करें
-            </p>
         </div>
         
         <div id="result" class="hidden">
             <div class="success">✅ <b>वीडियो डाउनलोड हो रहा है</b></div>
             <a href="#" id="downloadBtn" class="btn">⬇️ फिर से डाउनलोड करें</a>
-            <p style="color: #666; font-size: 14px; margin-top: 10px;">
-                अगर डाउनलोड शुरू नहीं होता, तो ऊपर बटन पर क्लिक करें
-            </p>
         </div>
         
         <div id="error" class="hidden error"></div>
-        
-        <div class="footer">
-            🔒 सुरक्षित डाउनलोड | ⚡ तेज़
-        </div>
+        <div class="footer">🔒 सुरक्षित डाउनलोड | ⚡ तेज़</div>
     </div>
     
     <script>
@@ -146,14 +101,13 @@ HTML_TEMPLATE = """
             const videoUrl = urlParams.get('url');
             
             if (!videoUrl) {
-                showError('❌ Video URL नहीं मिला! कृपया सही लिंक का उपयोग करें।');
+                showError('❌ Video URL नहीं मिला!');
                 return;
             }
             
             setTimeout(function() {
                 const downloadUrl = '/download-file?url=' + encodeURIComponent(videoUrl);
                 window.location.href = downloadUrl;
-                
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('result').classList.remove('hidden');
                 document.getElementById('downloadBtn').href = downloadUrl;
@@ -162,7 +116,6 @@ HTML_TEMPLATE = """
         
         function showError(msg) {
             document.getElementById('loading').classList.add('hidden');
-            document.getElementById('result').classList.add('hidden');
             document.getElementById('error').classList.remove('hidden');
             document.getElementById('error').textContent = msg;
         }
@@ -173,58 +126,17 @@ HTML_TEMPLATE = """
 
 @app.route('/')
 def home():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>Instagram Downloader API</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                margin: 0;
-                padding: 20px;
-            }
-            .container {
-                background: white;
-                border-radius: 20px;
-                padding: 40px;
-                max-width: 500px;
-                width: 100%;
-                text-align: center;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            }
-            h1 { color: #333; }
-            .status { color: #28a745; font-size: 18px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>📸 Instagram Video Downloader</h1>
-            <p class="status">✅ API is running!</p>
-            <p>Telegram Bot से लिंक जनरेट करें</p>
-            <p style="color: #666; font-size: 14px;">🔗 /download?url=VIDEO_URL</p>
-        </div>
-    </body>
-    </html>
-    """
+    return "✅ Instagram Downloader API is running!"
 
 @app.route('/download')
 def download_page():
     video_url = request.args.get('url', '')
     if not video_url:
         return "❌ No video URL provided!", 400
-    
     try:
         video_url = unquote(video_url)
     except:
         pass
-    
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/download-file')
@@ -244,16 +156,17 @@ def download_file():
         if response.status_code != 200:
             return f"❌ Download failed! Status: {response.status_code}", 400
         
+        # Create temp file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         
-        downloaded = 0
+        # Download in chunks
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 temp_file.write(chunk)
-                downloaded += len(chunk)
         
         temp_file.close()
         
+        # Send file
         return send_file(
             temp_file.name,
             as_attachment=True,
