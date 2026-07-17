@@ -13,10 +13,18 @@ from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
+# Try importing yt-dlp as fallback
+try:
+    import yt_dlp
+    YT_DLP_AVAILABLE = True
+except ImportError:
+    YT_DLP_AVAILABLE = False
+    print("⚠️ yt-dlp not installed. Install with: pip install yt-dlp")
+
 load_dotenv()
 
 # Configuration
-BOT_TOKEN = os.getenv("8906591214:AAGBVds2mjAh5KQJyN3i0a8vnoWoNDLGlE0")
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Use from .env, not hardcoded
 ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "1383239349").split(","))) if os.getenv("ADMIN_IDS") else []
 API_URL = os.getenv("API_URL", "https://vkrdownloader.xyz/server/")
 API_KEY = os.getenv("API_KEY", "vkrdownloader")
@@ -55,21 +63,117 @@ async def get_all_users() -> List[int]:
         ],
     )
 
-# Instagram media fetch function
+# Instagram media fetch function with multiple fallbacks
 async def fetch_insta_media(link: str) -> dict | None:
-    params = {"api_key": API_KEY, "vkr": link}
+    # First try the primary API
     try:
+        params = {"api_key": API_KEY, "vkr": link}
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(API_URL, params=params)
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            if not data.get("data") or not data["data"].get("downloads"):
-                return None
-            return data
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("data") and data["data"].get("downloads"):
+                    return data
     except Exception as e:
-        print(f"Error fetching media: {e}")
-        return None
+        print(f"Primary API error: {e}")
+    
+    # If primary fails and yt-dlp is available, try that
+    if YT_DLP_AVAILABLE:
+        try:
+            print("Trying yt-dlp as fallback...")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _extract_with_ytdlp, link)
+            if result:
+                return result
+        except Exception as e:
+            print(f"yt-dlp error: {e}")
+    
+    # Try alternative API
+    try:
+        alt_apis = [
+            "https://api.socialdownload.cc/instagram",
+            "https://instagram-api.vercel.app/api/info"
+        ]
+        for alt_url in alt_apis:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.get(alt_url, params={"url": link})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        # Try to extract video URL from different response structures
+                        video_url = None
+                        if "video" in data:
+                            video_url = data["video"]
+                        elif "video_url" in data:
+                            video_url = data["video_url"]
+                        elif "data" in data and "video_url" in data["data"]:
+                            video_url = data["data"]["video_url"]
+                        
+                        if video_url:
+                            return {
+                                "data": {
+                                    "downloads": [{
+                                        "url": video_url,
+                                        "ext": "mp4",
+                                        "quality": "720p"
+                                    }],
+                                    "caption": data.get("caption", data.get("title", ""))
+                                }
+                            }
+            except:
+                continue
+    except Exception as e:
+        print(f"Alternative API error: {e}")
+    
+    return None
+
+def _extract_with_ytdlp(url):
+    """Extract Instagram video using yt-dlp"""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'format': 'best[ext=mp4]'
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info:
+                # Get best video URL
+                formats = info.get('formats', [])
+                best_format = None
+                best_height = 0
+                for f in formats:
+                    height = f.get('height', 0)
+                    if height and height > best_height and f.get('vcodec') != 'none':
+                        best_height = height
+                        best_format = f
+                
+                if best_format:
+                    return {
+                        "data": {
+                            "downloads": [{
+                                "url": best_format.get('url'),
+                                "ext": "mp4",
+                                "quality": f"{best_height}p"
+                            }],
+                            "caption": info.get('title', info.get('description', ''))
+                        }
+                    }
+                elif info.get('url'):
+                    return {
+                        "data": {
+                            "downloads": [{
+                                "url": info.get('url'),
+                                "ext": "mp4",
+                                "quality": "720p"
+                            }],
+                            "caption": info.get('title', info.get('description', ''))
+                        }
+                    }
+    except Exception as e:
+        print(f"yt-dlp extraction error: {e}")
+    return None
 
 # Download video with progress
 async def download_with_progress(url: str, msg: Message, label: str) -> bytes | None:
@@ -81,12 +185,12 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
                 total = int(resp.headers.get("content-length", 0))
                 if total == 0:
                     return None
-                chunks = b""
+                chunks = bytearray()
                 start = time.time()
                 last_update = 0
                 done = 0
                 async for chunk in resp.aiter_bytes(1024 * 64):
-                    chunks += chunk
+                    chunks.extend(chunk)
                     done += len(chunk)
                     now = time.time()
                     if now - last_update >= 2 and total > 0:
@@ -99,7 +203,7 @@ async def download_with_progress(url: str, msg: Message, label: str) -> bytes | 
                             await msg.edit_text(f"{label} {pct}%  ETA: {eta_str}")
                         except Exception:
                             pass
-                return chunks
+                return bytes(chunks)
     except Exception as e:
         print(f"Download error: {e}")
         return None
@@ -198,7 +302,7 @@ async def handle_instagram_url(message: Message):
     try:
         data = await fetch_insta_media(text)
         if not data:
-            await wait_msg.edit_text("❌ <b>Error:</b> Could not fetch media. Make sure the URL is public.")
+            await wait_msg.edit_text("❌ <b>Error:</b> Could not fetch media. The video might be private or the service is temporarily unavailable.")
             return
         
         downloads = data["data"]["downloads"]
@@ -215,7 +319,7 @@ async def handle_instagram_url(message: Message):
                 continue
             ext = (item.get("ext") or "mp4").lower()
             if ext in {"mp4", "webm"}:
-                quality_str = item.get("quality", "unknown")
+                quality_str = str(item.get("quality", "unknown"))
                 quality_score = 0
                 if "1080" in quality_str:
                     quality_score = 3
@@ -279,6 +383,10 @@ async def main():
     init_db()
     print("✅ Database initialized")
     print(f"📊 Admin IDs: {ADMIN_IDS}")
+    if YT_DLP_AVAILABLE:
+        print("✅ yt-dlp available as fallback")
+    else:
+        print("⚠️ yt-dlp not installed - install for better reliability")
     print("🚀 Bot is running...")
     await dp.start_polling(bot)
 
