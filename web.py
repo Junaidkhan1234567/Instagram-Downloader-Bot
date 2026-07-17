@@ -216,7 +216,6 @@ def home():
 
 @app.route('/download')
 def download_page():
-    """Download page with auto download"""
     video_url = request.args.get('url', '')
     if not video_url:
         return "❌ No video URL provided!", 400
@@ -230,7 +229,6 @@ def download_page():
 
 @app.route('/download-file')
 def download_file():
-    """Direct file download"""
     video_url = request.args.get('url', '')
     if not video_url:
         return "❌ No video URL provided!", 400
@@ -246,10 +244,8 @@ def download_file():
         if response.status_code != 200:
             return f"❌ Download failed! Status: {response.status_code}", 400
         
-        # Create temp file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
         
-        # Download in chunks
         downloaded = 0
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
@@ -258,7 +254,6 @@ def download_file():
         
         temp_file.close()
         
-        # Send file
         return send_file(
             temp_file.name,
             as_attachment=True,
