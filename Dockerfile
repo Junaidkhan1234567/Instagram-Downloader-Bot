@@ -2,20 +2,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for caching)
-COPY requirements.txt .
-
-# Install Python packages
+# Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip
+
+# Copy requirements and install
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy application code
 COPY . .
 
-# Run bot
+# Run the bot
 CMD ["python", "main.py"]
